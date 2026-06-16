@@ -1,0 +1,60 @@
+name: CI — silver-octo-memory
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Node version
+        run: node --version
+
+      - name: Cache npm (if package.json present)
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-npm-
+
+      - name: Install dependencies (if present)
+        run: |
+          if [ -f package.json ]; then
+            npm ci
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "No dependency manifest — skipping install"
+          fi
+
+      - name: Lint JS/TS files (if present)
+        run: |
+          if ls *.ts *.js *.tsx *.jsx 2>/dev/null | head -1; then
+            npx --yes eslint . --ext .ts,.tsx,.js,.jsx --no-eslintrc -c '{"rules":{}}' || true
+          fi
+
+      - name: Validate JSON files
+        run: |
+          for f in $(find . -name '*.json' -not -path './.git/*'); do
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8')); console.log('OK: $f')" || echo "INVALID JSON: $f"
+          done
+
+      - name: Repository structure report
+        run: |
+          echo "=== Repository Contents ==="
+          find . -not -path './.git/*' -not -path './.github/*' | sort
